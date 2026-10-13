@@ -25,7 +25,7 @@ buttons.forEach(b=>b.addEventListener('click',()=>select(b.dataset.word,'touch')
 $('speakBtn').onclick=()=>{if($('lastSelection').textContent!=='None')speak($('lastSelection').textContent)};
 function updateMetrics(){const v=measurements.map(m=>m.error);$('meanError').textContent=v.length?Math.round(average(v)):'—';$('medianError').textContent=v.length?Math.round(median(v)):'—';$('successRate').textContent=v.length?Math.round(v.filter(e=>e<=100).length/v.length*100)+'%':'—';$('selectionCount').textContent=selections;$('falseCount').textContent='Marked accidental selections: '+accidentals}
 function updateGaze(now){if(test)return;if(!running||!estimate||now-lastFace>450){clearTracking();$('trackState').textContent='Tracking unavailable — selection paused';return}const p=predict(estimate);if(!p){clearTracking();$('trackState').textContent='Calibration required';return}
- const delta=smoothed?Math.hypot(p[0]-smoothed[0],p[1]-smoothed[1]):1,alpha=delta>.085?.52:.18;smoothed=smoothed?smoothed.map((v,i)=>v*(1-alpha)+p[i]*alpha):p;
+ const delta=smoothed?Math.hypot(p[0]-smoothed[0],p[1]-smoothed[1]):1,alpha=delta>.085?.52:((window.v4SmoothingLevel||2)===1?.30:(window.v4SmoothingLevel===3?.10:.18));smoothed=smoothed?smoothed.map((v,i)=>v*(1-alpha)+p[i]*alpha):p;
  $('dot').style.display='block';$('dot').style.left=(smoothed[0]*100)+'%';$('dot').style.top=(smoothed[1]*100)+'%';
  $('trackState').textContent='Face detected · calibrated';$('eyeInfo').textContent='Screen estimate: '+Math.round(smoothed[0]*innerWidth)+', '+Math.round(smoothed[1]*innerHeight)+' px';
  const b=chosenButton(smoothed),dt=lastTick?Math.min(.12,(now-lastTick)/1000):0;lastTick=now;
