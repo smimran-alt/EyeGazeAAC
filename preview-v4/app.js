@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const buttons=[...document.querySelectorAll('.aac')], KEY='eyegaze-aac-web-v2.4-profile';
+const buttons=[...document.querySelectorAll('.aac')];
 let mesh=null,stream=null,running=false,busy=false,lastFace=0,estimate=null,smoothed=null,model=null,centerOffset=[0,0],dwell=1.6,active=null,held=0,lastTick=0,armed=true,lockedTarget=null,test=null,measurements=[],selections=0,accidentals=0,lastGazeSelection=false;
 const clamp=(n,lo,hi)=>Math.max(lo,Math.min(hi,n)),average=a=>a.reduce((s,v)=>s+v,0)/a.length,median=a=>{const b=[...a].sort((x,y)=>x-y);return b.length?(b[Math.floor((b.length-1)/2)]+b[Math.ceil((b.length-1)/2)])/2:NaN},dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
 function status(s){$('status').textContent=s}
@@ -42,7 +42,7 @@ function result(r){const now=performance.now(),faces=r.multiFaceLandmarks||[],l=
 async function start(){if(running)return;if(!window.isSecureContext){status('HTTPS required (localhost is also allowed)');return}if(!navigator.mediaDevices?.getUserMedia){status('Camera API unavailable in this browser');return}
  try{status('Requesting camera permission…');stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:'user',width:{ideal:640},height:{ideal:480},frameRate:{ideal:20,max:30}}});$('video').srcObject=stream;await $('video').play();$('camPlaceholder').style.display='none';if(typeof FaceMesh==='undefined')throw Error('FaceMesh library did not load. Check internet or content blockers.');
  mesh=new FaceMesh({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4/'+f});mesh.setOptions({maxNumFaces:1,refineLandmarks:true,minDetectionConfidence:.55,minTrackingConfidence:.55});mesh.onResults(result);
- running=true;$('startBtn').disabled=true;$('stopBtn').disabled=false;$('calibrateBtn').disabled=false;$('validateBtn').disabled=!model;$('recheckBtn').disabled=!model;$('modeBadge').textContent='Camera active';status(model?'Camera started — profile loaded':'Camera started — calibrate to enable gaze');frameLoop();tick();
+ running=true;$('startBtn').disabled=true;$('stopBtn').disabled=false;$('calibrateBtn').disabled=false;$('validateBtn').disabled=!model;$('recheckBtn').disabled=!model;$('modeBadge').textContent='Camera active';status(model?'Camera started — calibrated':'Camera started — calibrate to enable gaze');frameLoop();tick();
  }catch(e){status('Camera error: '+e.message);stop()}}
 async function frameLoop(){if(!running)return;if(!busy&&$('video').readyState>=2){busy=true;try{await mesh.send({image:$('video')})}catch(e){status('Tracking error: '+e.message)}finally{busy=false}}if(running)setTimeout(frameLoop,45)}
 function tick(){if(!running)return;updateGaze(performance.now());requestAnimationFrame(tick)}
@@ -56,15 +56,12 @@ function testSample(now,f){if(!test||now-test.started<650)return;test.samples.pu
  const values=[0,1,2,3].map(i=>median(test.samples.map(s=>s[i]))),[x,y]=test.kind==='center'?[.5,.5]:positions[test.index];test.pairs.push({f:values,x,y});test.index++;if(test.index===(test.kind==='center'?1:9))finishTest(true);else testNext()
 }
 function finishTest(success){const t=test;test=null;$('testOverlay').hidden=true;clearTracking();if(!success)return;
- if(t.kind==='calibrate'){const m=fit(t.pairs);if(!m){status('Calibration fit failed — retry');return}model=m;centerOffset=[0,0];measurements=[];$('validateBtn').disabled=false;$('recheckBtn').disabled=false;$('saveBtn').disabled=false;status('Nine-point calibration completed. Run accuracy test.');updateMetrics()}
+ if(t.kind==='calibrate'){const m=fit(t.pairs);if(!m){status('Calibration fit failed — retry');return}model=m;centerOffset=[0,0];measurements=[];$('validateBtn').disabled=false;$('recheckBtn').disabled=false;status('Nine-point calibration completed. Run accuracy test.');updateMetrics()}
  else if(t.kind==='validate'){if(!model){status('Calibrate first');return}measurements=t.pairs.map(p=>{const pr=predict(p.f);return {target:[p.x,p.y],prediction:pr,error:Math.hypot((pr[0]-p.x)*innerWidth,(pr[1]-p.y)*innerHeight)}});$('testSummary').textContent=measurements.length+' validation points measured. Test again after changes in camera angle or seating.';status('Accuracy test completed. See results below.');updateMetrics()}
  else if(t.kind==='center'){if(!model)return;const p=predict(t.pairs[0].f),dx=clamp(.5-p[0],-.06,.06),dy=clamp(.5-p[1],-.06,.06);centerOffset[0]+=dx;centerOffset[1]+=dy;status('Small center correction applied. Save your profile after validation.')}
 }
 $('calibrateBtn').onclick=()=>beginTest('calibrate');$('validateBtn').onclick=()=>beginTest('validate');$('recheckBtn').onclick=()=>beginTest('center');$('cancelTest').onclick=()=>{test=null;$('testOverlay').hidden=true;status('Calibration/test cancelled')};
 $('dwell').oninput=()=>{dwell=Number($('dwell').value);$('dwellOut').textContent=dwell.toFixed(1)+' s';clearTracking()};
-$('saveBtn').onclick=()=>{if(!model)return;const profile={version:1,name:$('profileName').value.trim()||'My profile',model,centerOffset,dwell,created:new Date().toISOString()};localStorage.setItem(KEY,JSON.stringify(profile));status('Profile saved locally: '+profile.name)};
-$('loadBtn').onclick=()=>{try{const p=JSON.parse(localStorage.getItem(KEY)||'null');if(!p||p.version!==1||!Array.isArray(p.model?.x)||p.model.x.length!==5||!Array.isArray(p.model?.y)||p.model.y.length!==5)throw Error('No compatible profile saved');model=p.model;centerOffset=p.centerOffset||[0,0];dwell=clamp(Number(p.dwell)||1.6,.8,3);$('dwell').value=dwell;$('dwellOut').textContent=dwell.toFixed(1)+' s';$('profileName').value=p.name;$('saveBtn').disabled=false;$('validateBtn').disabled=!running;$('recheckBtn').disabled=!running;clearTracking();status('Loaded profile: '+p.name+' — verify accuracy before use')}catch(e){status(e.message)}};
-$('clearBtn').onclick=()=>{if(confirm('Delete this browser’s saved EyeGaze profile?')){localStorage.removeItem(KEY);status('Saved profile deleted (current calibration remains active)')}};
 $('falseBtn').onclick=()=>{if(lastGazeSelection){accidentals++;lastGazeSelection=false;$('falseBtn').disabled=true;updateMetrics()}};
 $('exportBtn').onclick=()=>{const report={app:'EyeGaze AAC Web v4.0',timestamp:new Date().toISOString(),viewport:[innerWidth,innerHeight],measurements,selectionCount:selections,markedAccidentalSelections:accidentals,dwellSeconds:dwell};const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='eyegaze-accuracy-report.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),2000)};
 window.addEventListener('pagehide',()=>{stream?.getTracks().forEach(t=>t.stop())});updateMetrics();
